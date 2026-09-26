@@ -1,0 +1,112 @@
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-non-privileged-containers
+  annotations:
+    policies.kyverno.io/title: Require Non-Privileged Containers
+    policies.kyverno.io/category: Pod Security Standards (Restricted)
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Containers must not run as privileged. This policy ensures containers
+      have securityContext.privileged set to false.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: privileged-containers
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      preconditions:
+        all:
+          - key: "{{ request.operation || 'BACKGROUND' }}"
+            operator: Any
+            value:
+              - CREATE
+              - UPDATE
+      context:
+        - name: privilegedCount
+          variable:
+            jmesPath: "spec.containers[*].securityContext.privileged | count(@ > 0)"
+      validate:
+        message: "Privileged containers are not allowed."
+        failureCondition: "result == 'fail'"
+        failureMessage: "Privileged containers are not allowed."
+        deny:
+          conditions:
+            - key: "{{ privilegedCount || 0 }}"
+              operator: GreaterThan
+              value: 0
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-run-as-non-root
+  annotations:
+    policies.kyverno.io/title: Require Run As Non-Root
+    policies.kyverno.io/category: Pod Security Standards (Restricted)
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Containers must run as non-root. This policy ensures containers have
+      securityContext.runAsNonRoot set to true.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: run-as-non-root
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      context:
+        - name: rootContainers
+          variable:
+            jmesPath: "spec.containers[*].securityContext.runAsNonRoot | count(@ == false)"
+      validate:
+        message: "Containers must run as non-root."
+        failureCondition: "result == 'fail'"
+        failureMessage: "Containers must run as non-root."
+        deny:
+          conditions:
+            - key: "{{ rootContainers || 0 }}"
+              operator: GreaterThan
+              value: 0
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: drop-all-capabilities
+  annotations:
+    policies.kyverno.io/title: Drop All Capabilities
+    policies.kyverno.io/category: Pod Security Standards (Restricted)
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Containers must drop all capabilities. This policy ensures containers
+      have securityContext.capabilities.drop set to include ALL.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: drop-all
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      context:
+        - name: droppedCapabilities
+          variable:
+            jmesPath: "spec.containers[*].securityContext.capabilities.drop | count(@[] == 'ALL')"
+      validate:
+        message: "Containers must drop ALL capabilities."
+        failureCondition: "result == 'fail'"
+        failureMessage: "Containers must drop ALL capabilities."
+        deny:
+          conditions:
+            - key: "{{ droppedCapabilities || 0 }}"
+              operator: LessThan
+              value: "{{ length(@.spec.containers) }}"

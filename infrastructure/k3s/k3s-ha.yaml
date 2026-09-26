@@ -1,0 +1,42 @@
+---
+apiVersion: k3s.io/v1alpha1
+kind: Cluster
+metadata:
+  name: forge-ha
+spec:
+  servers:
+    - hostname: gb10-01
+      ip: 10.0.0.101
+      roles:
+        - server
+    - hostname: gb10-02
+      ip: 10.0.0.102
+      roles:
+        - server
+    - hostname: gb10-03
+      ip: 10.0.0.103
+      roles:
+        - server
+  agents:
+    - hostname: gb10-04
+      ip: 10.0.0.104
+      labels:
+        forge/role: batch
+    - hostname: gb10-05
+      ip: 10.0.0.105
+      labels:
+        forge/role: serve
+    - hostname: gb10-06
+      ip: 10.0.0.106
+      labels:
+        forge/role: serve
+  network:
+    flannelBackend: none
+    serviceCIDR: 10.43.0.0/16
+    clusterCIDR: 10.42.0.0/16
+    cni: calico
+  extraArgs:
+    - kubelet-arg=cloud-provider=external
+  disable:
+    - traefik
+    - local-storage

@@ -1,0 +1,67 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Forge Dashboard",
+    "tags": ["forge", "k8s"],
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "version": 1,
+    "panels": [
+      {
+        "id": 1,
+        "title": "API Requests",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(http_requests_total[5m])",
+            "legendFormat": "{{method}} {{route}}"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "API Latency",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "p95 latency"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "vLLM GPU Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "nvidia_gpu_memory_used_bytes / nvidia_gpu_memory_total_bytes",
+            "legendFormat": "GPU {{gpu}} usage"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "LiteLLM Requests",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(litellm_request_total[5m])",
+            "legendFormat": "{{model}}"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Ray Workers",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "ray_task_scheduler_stats_num_running_tasks",
+            "legendFormat": "Running tasks"
+          }
+        ]
+      }
+    ]
+  }
+}

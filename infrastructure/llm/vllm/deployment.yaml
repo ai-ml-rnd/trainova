@@ -1,0 +1,108 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: llm-gateway
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-generator
+  namespace: llm-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm-generator
+  template:
+    metadata:
+      labels:
+        app: vllm-generator
+    spec:
+      nodeSelector:
+        forge/role: serve
+      tolerations:
+        - key: forge/serve
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: vllm-generator
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: vllm
+          image: nvcr.io/nvidia/vllm:v26.02-py3@sha256:XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+          ports:
+            - containerPort: 8000
+              name: vllm
+          resources:
+            requests:
+              nvidia.com/gpu: 1
+              memory: 96Gi
+              cpu: 32
+            limits:
+              nvidia.com/gpu: 1
+              memory: 96Gi
+              cpu: 32
+          env:
+            - name: CUDA_VISIBLE_DEVICES
+              value: "0"
+            - name: VLLM_HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: VLLM_PORT
+              value: "8000"
+            - name: VLLM_GPU_MEMORY_UTILIZATION
+              value: "0.85"
+            - name: VLLM_MAX_NUM_SEQS
+              value: "256"
+            - name: VLLM_PREFIX_CACHING_ENABLED
+              value: "true"
+            - name: VLLM_MODEL_PATH
+              value: "/models"
+          volumeMounts:
+            - name: model-volume
+              mountPath: /models
+              readOnly: true
+            - name: tmp-volume
+              mountPath: /tmp
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+      volumes:
+        - name: model-volume
+          persistentVolumeClaim:
+            claimName: vllm-models-pvc
+        - name: tmp-volume
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-generator
+  namespace: llm-gateway
+spec:
+  selector:
+    app: vllm-generator
+  ports:
+    - port: 8000
+      name: vllm
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vllm-models-pvc
+  namespace: llm-gateway
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: fast-ssd
+  resources:
+    requests:
+      storage: 500Gi

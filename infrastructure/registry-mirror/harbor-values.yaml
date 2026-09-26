@@ -1,0 +1,69 @@
+# Harbor values for air-gap deployment
+# Apply with: helm install harbor harbor/harbor -f values.yaml -n harbor-system --create-namespace
+
+replicaCount: 1
+
+exposureType: clusterIP
+service:
+  type: ClusterIP
+  port: 443
+
+# External URL (change to your domain)
+externalURL: https://harbor.internal.example.com
+
+# TLS configuration
+tls:
+  enabled: true
+  certSource: secret
+  secret:
+    secretName: harbor-tls-secret
+
+# Database configuration (external PostgreSQL)
+database:
+  type: external
+  external:
+    host: postgres.internal.example.com
+    port: 5432
+    username: harbor
+    password: "harbor-db-password"
+    database: harbor
+    sslmode: require
+
+# Redis configuration (external)
+redis:
+  type: external
+  host: redis.internal.example.com
+    port: 6379
+    password: "redis-password"
+
+# ChartMuseum (for Helm charts)
+chartmuseum:
+  enabled: true
+
+# Notary (for image signing)
+notary:
+  enabled: true
+
+# Trivy (for vulnerability scanning)
+trivy:
+  enabled: true
+  mode: standalone
+  securityCheck: all
+
+# Registry configuration
+registry:
+  credentials:
+    username: registry
+    password: "registry-password"
+
+# Admin password (change in production)
+adminPassword: "harbor-admin-password"
+
+# Resource limits
+resources:
+  limits:
+    cpu: 4000m
+    memory: 8Gi
+  requests:
+    cpu: 1000m
+    memory: 2Gi

@@ -1,0 +1,26 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gpu-operator
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: gpu-operator
+  namespace: gpu-operator
+spec:
+  targetNamespaces:
+    - gpu-operator
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: nvidia-gpu-operator
+  namespace: gpu-operator
+spec:
+  channel: "stable-24.9"
+  name: nvidia-gpu-operator
+  source: nvidia-gpu-operator-catalog
+  sourceNamespace: nvidia-gpu-operator
+  startingCSV: nvidia-gpu-operator.v24.9.0

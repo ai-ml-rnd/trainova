@@ -1,0 +1,62 @@
+# LiteLLM Configuration for Forge Platform
+
+# General settings
+general_settings:
+  master_key: $LITELLM_MASTER_KEY
+  database_url: $DATABASE_URL
+  num_workers: 4
+
+# Model routes
+model_list:
+  - model_name: gen-default
+    litellm_params:
+      model: openai/gpt-4-turbo
+      api_base: http://vllm-generator.llm-gateway.svc.cluster.local:8000
+      api_key: $VLLM_API_KEY
+      temperature: 0.7
+      max_tokens: 4096
+
+  - model_name: judge-default
+    litellm_params:
+      model: openai/gpt-4-turbo
+      api_base: http://vllm-judge.llm-gateway.svc.cluster.local:8000
+      api_key: $VLLM_API_KEY
+      temperature: 0.3
+      max_tokens: 2048
+
+  - model_name: vlm-default
+    litellm_params:
+      model: openai/gpt-4-vision
+      api_base: http://vllm-vlm.llm-gateway.svc.cluster.local:8000
+      api_key: $VLLM_API_KEY
+      temperature: 0.7
+      max_tokens: 4096
+
+  - model_name: embed-default
+    litellm_params:
+      model: openai/text-embedding-3-large
+      api_base: http://vllm-embed.llm-gateway.svc.cluster.local:8000
+      api_key: $VLLM_API_KEY
+
+# Router settings
+router_settings:
+  routing_strategy: simple_round_robin
+  retry_after: 30
+  model_group_alias: {}
+
+# LitellM settings
+litellm_settings:
+  num_retries: 3
+  request_timeout: 300
+  telemetry: false
+  drop_params: true
+
+# Callback settings
+callback_settings:
+  callbacks:
+    - langfuse
+
+# Logging settings
+logging_settings:
+  log_telemetry: false
+  log_filepath: /logs/litellm.log

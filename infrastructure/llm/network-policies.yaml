@@ -1,0 +1,89 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: forge-app
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: llm-gateway
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: forge-to-litellm
+  namespace: forge-app
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: llm-gateway
+      ports:
+        - protocol: TCP
+          port: 4000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: litellm-to-vllm
+  namespace: llm-gateway
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: llm-gateway
+      ports:
+        - protocol: TCP
+          port: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-vllm-external
+  namespace: llm-gateway
+spec:
+  podSelector:
+    matchLabels:
+      app: vllm
+  policyTypes:
+    - Egress
+  egress: []
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-litellm-ingress
+  namespace: llm-gateway
+spec:
+  podSelector:
+    matchLabels:
+      app: litellm
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: forge-app
+      ports:
+        - protocol: TCP
+          port: 4000
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: llm-gateway
+      ports:
+        - protocol: TCP
+          port: 8000
