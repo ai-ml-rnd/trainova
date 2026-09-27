@@ -1,33 +1,21 @@
 """Import job endpoints."""
 
+import uuid
+from datetime import datetime
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
 
 from app.dependencies import current_tenant, db
+from models.import_job import ImportJob, ImportJobStatus, SourceType
+from core.import_worker import ImportWorker
 
-from jobs.import_jobs import ImportJob, ImportJobQueue
+from api.v1.schemas import (
+    ImportJobCreate,
+    ImportJobResponse,
+)
 
 router = APIRouter()
-
-
-class ImportJobCreate(BaseModel):
-    """Create import job request."""
-
-    dataset_id: str
-    format: str = Field(..., pattern="^(jsonl|parquet|csv|hf)$")
-    source: str = Field(..., description="Source path/URI/ID")
-
-
-class ImportJobResponse(BaseModel):
-    """Import job response."""
-
-    id: str
-    dataset_id: str
-    format: str
-    source: str
-    status: str
-    progress: float
-    created_at: str
 
 
 @router.post("", response_model=ImportJobResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -37,28 +25,32 @@ async def create_import_job(
     session=Depends(db),
 ):
     """Create an import job."""
-    import uuid
-    from datetime import datetime
-
+    # Validate dataset exists and belongs to tenant
+    # TODO: Implement dataset validation
+    
+    # Create import job
     import_job = ImportJob(
-        id=str(uuid.uuid4()),
-        dataset_id=job.dataset_id,
-        format=job.format,
-        source=job.source,
-        status="queued",
+        id=uuid.uuid4(),
+        dataset_id=uuid.UUID(job.dataset_id),
+        source_type=SourceType(job.source_type),
+        source_path=job.source_path,
+        status=ImportJobStatus.QUEUED,
         created_at=datetime.utcnow(),
     )
-
-    queue = ImportJobQueue()
-    job_id = await queue.enqueue(import_job)
-
+    
+    session.add(import_job)
+    await session.commit()
+    await session.refresh(import_job)
+    
+    # TODO: Enqueue job for worker processing
+    
     return ImportJobResponse(
-        id=job_id,
-        dataset_id=job.dataset_id,
-        format=job.format,
-        source=job.source,
-        status="queued",
-        progress=0.0,
+        id=str(import_job.id),
+        dataset_id=str(import_job.dataset_id),
+        source_type=import_job.source_type.value,
+        source_path=import_job.source_path,
+        status=import_job.status.value,
+        progress=import_job.progress,
         created_at=import_job.created_at.isoformat(),
     )
 
@@ -70,30 +62,84 @@ async def get_import_job(
     session=Depends(db),
 ):
     """Get import job status."""
-    queue = ImportJobQueue()
-    job_data = await queue.get_job(job_id)
-
-    if not job_data:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
-
+    stmt = select(ImportJob).where(ImportJob.id == uuid.UUID(job_id))
+    result = await session.execute(stmt)
+    job = result.scalar_one_or_none()
+    
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Import job not found",
+        )
+    
     return ImportJobResponse(
-        id=job_id,
-        dataset_id=job_data["dataset_id"],
-        format=job_data["format"],
-        source=job_data["source"],
-        status=job_data["status"],
-        progress=float(job_data.get("progress", 0)),
-        created_at=job_data["created_at"],
+        id=str(job.id),
+        dataset_id=str(job.dataset_id),
+        source_type=job.source_type.value,
+        source_path=job.source_path,
+        status=job.status.value,
+        progress=job.progress,
+        rows_imported=job.rows_imported,
+        total_rows=job.total_rows,
+        error=job.error,
+        created_at=job.created_at.isoformat() if job.created_at else None,
+        started_at=job.started_at.isoformat() if job.started_at else None,
+        finished_at=job.finished_at.isoformat() if job.finished_at else None,
     )
 
 
-@router.get("", response_model=list[ImportJobResponse])
-async def list_import_jobs(
-    limit: int = 50,
-    status: str | None = None,
+@router.post("/{job_id}:cancel", response_model=ImportJobResponse)
+async def cancel_import_job(
+    job_id: str,
     tenant_id: str = Depends(current_tenant),
     session=Depends(db),
 ):
-    """List import jobs."""
-    # TODO: Implement job listing
-    return []
+    """Cancel an import job."""
+    stmt = select(ImportJob).where(ImportJob.id == uuid.UUID(job_id))
+    result = await session.execute(stmt)
+    job = result.scalar_one_or_none()
+    
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Import job not found",
+        )
+    
+    if job.status not in [ImportJobStatus.QUEUED, ImportJobStatus.RUNNING]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot cancel job in status: {job.status.value}",
+        )
+    
+    job.status = ImportJobStatus.CANCELLED
+    job.finished_at = datetime.utcnow()
+    await session.commit()
+    await session.refresh(job)
+    
+    return ImportJobResponse(
+        id=str(job.id),
+        dataset_id=str(job.dataset_id),
+        source_type=job.source_type.value,
+        source_path=job.source_path,
+        status=job.status.value,
+        progress=job.progress,
+        error=job.error,
+        created_at=job.created_at.isoformat() if job.created_at else None,
+        started_at=job.started_at.isoformat() if job.started_at else None,
+        finished_at=job.finished_at.isoformat() if job.finished_at else None,
+    )
+
+
+@router.get("/{job_id}/events")
+async def get_import_job_events(
+    job_id: str,
+    last_event_id: Optional[str] = None,
+    session=Depends(db),
+):
+    """Get import job progress events (SSE)."""
+    # TODO: Implement SSE stream from Valkey
+    # For now, return static response
+    return {
+        "job_id": job_id,
+        "events": [],
+    }

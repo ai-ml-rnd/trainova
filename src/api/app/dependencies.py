@@ -1,35 +1,43 @@
 """Application dependencies."""
 
-from contextlib import contextmanager
-from typing import Generator
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
 
 from fastapi import Depends, Header, HTTPException, status
-from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    create_async_engine,
+)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
 from app.config import settings
 
-# Database
-engine = create_engine(
-    settings.database_url,
+# Database (async)
+engine = create_async_engine(
+    settings.database_url.replace("postgresql://", "postgresql+asyncpg://"),
     pool_size=settings.database_pool_size,
     max_overflow=settings.database_max_overflow,
 )
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+AsyncSessionLocal = sessionmaker(
+    bind=engine,
+    class_=AsyncSession,
+    autocommit=False,
+    autoflush=False,
+)
 
 Base = declarative_base()
 
 
-@contextmanager
-def get_db() -> Generator:
+@asynccontextmanager
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Get database session."""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+        finally:
+            await session.close()
 
 
 def get_current_tenant(

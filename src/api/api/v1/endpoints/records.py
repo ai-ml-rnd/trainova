@@ -1,47 +1,69 @@
 """Record endpoints."""
 
+import uuid
+from typing import List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
 
 from app.dependencies import current_tenant, db
+from core.record_store import Record, ScanResult
+from core.postgres_record_store import PostgresRecordStore
+
+from api.v1.schemas import (
+    RecordCreate,
+    RecordResponse,
+    BulkRecordResponse,
+    FilterRequest,
+    SemanticSearchRequest,
+)
 
 router = APIRouter()
 
 
-class RecordCreate(BaseModel):
-    """Create record request."""
-
-    fields: dict = Field(..., description="Record fields per dataset schema")
-    metadata: dict = Field(default_factory=dict, description="Record metadata")
-    provenance: list[dict] = Field(default_factory=list, description="Record provenance")
-
-
-class RecordResponse(BaseModel):
-    """Record response."""
-
-    record_id: str
-    fields: dict
-    metadata: dict
-    provenance: list[dict]
-    status: str
-
-
-@router.post("/{dataset_id}/records", response_model=RecordResponse, status_code=status.HTTP_201_CREATED)
-async def create_record(
+@router.post("/{dataset_id}:bulk", response_model=BulkRecordResponse)
+async def bulk_add_records(
     dataset_id: str,
-    record: RecordCreate,
+    records: List[RecordCreate],
     tenant_id: str = Depends(current_tenant),
     session=Depends(db),
 ):
-    """Create a new record in a dataset."""
-    # TODO: Implement record creation with Lance
-    return RecordResponse(
-        record_id="test-record-id",
-        fields=record.fields,
-        metadata=record.metadata,
-        provenance=record.provenance,
-        status="pending",
-    )
+    """Add records to a dataset.
+    
+    Args:
+        dataset_id: The dataset ID
+        records: List of records to add (max 10k)
+        tenant_id: Tenant ID from token
+        
+    Returns:
+        BulkRecordResponse with number of records added
+    """
+    # Validate record count
+    if len(records) > 10000:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot add more than 10,000 records at once",
+        )
+    
+    # Convert to domain records
+    domain_records = [
+        Record(
+            record_id=r.record_id,
+            fields=r.fields,
+            metadata=r.metadata or {},
+            provenance=r.provenance or [],
+            quality=r.quality or {},
+            status=r.status or "pending",
+            reject_reason=r.reject_reason,
+            embedding=r.embedding,
+        )
+        for r in records
+    ]
+    
+    # Add records
+    store = PostgresRecordStore(session)
+    added = await store.bulk_add(dataset_id, domain_records)
+    
+    return BulkRecordResponse(added=added)
 
 
 @router.get("/{dataset_id}/records/{record_id}", response_model=RecordResponse)
@@ -51,77 +73,106 @@ async def get_record(
     tenant_id: str = Depends(current_tenant),
     session=Depends(db),
 ):
-    """Get record by ID."""
-    # TODO: Implement record retrieval from Lance
+    """Get a record by ID."""
+    store = PostgresRecordStore(session)
+    record = await store.get_by_id(dataset_id, record_id)
+    
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Record not found",
+        )
+    
     return RecordResponse(
-        record_id=record_id,
-        fields={},
-        metadata={},
-        provenance=[],
-        status="pending",
-    )
-
-
-@router.post("/{dataset_id}/records/search", response_model=dict)
-async def search_records(
-    dataset_id: str,
-    query: dict = Field(..., description="Search query DSL"),
-    limit: int = 50,
-    cursor: str | None = None,
-    tenant_id: str = Depends(current_tenant),
-    session=Depends(db),
-):
-    """Search records using DSL query."""
-    # TODO: Implement record search with Lance
-    return {
-        "records": [],
-        "next_cursor": None,
-        "pagination": {"page": 1, "page_size": limit, "total": 0},
-    }
-
-
-@router.post("/{dataset_id}/records:bulk", response_model=dict)
-async def bulk_create_records(
-    dataset_id: str,
-    records: list[RecordCreate] = Field(..., max_length=10000, description="Batch of records to create"),
-    tenant_id: str = Depends(current_tenant),
-    session=Depends(db),
-):
-    """Bulk create records (max 10k)."""
-    # TODO: Implement bulk record creation with Lance
-    return {
-        "created": len(records),
-        "failed": 0,
-        "errors": [],
-    }
-
-
-@router.patch("/{dataset_id}/records/{record_id}", response_model=RecordResponse)
-async def update_record(
-    dataset_id: str,
-    record_id: str,
-    record: RecordCreate,
-    tenant_id: str = Depends(current_tenant),
-    session=Depends(db),
-):
-    """Update record."""
-    # TODO: Implement record update with Lance
-    return RecordResponse(
-        record_id=record_id,
+        record_id=record.record_id,
         fields=record.fields,
         metadata=record.metadata,
         provenance=record.provenance,
-        status="pending",
+        quality=record.quality,
+        status=record.status,
+        reject_reason=record.reject_reason,
+        embedding=record.embedding,
     )
 
 
-@router.delete("/{dataset_id}/records/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_record(
+@router.get("/{dataset_id}/records", response_model=List[RecordResponse])
+async def scan_records(
     dataset_id: str,
-    record_id: str,
+    cursor: Optional[str] = None,
+    limit: int = 100,
     tenant_id: str = Depends(current_tenant),
     session=Depends(db),
 ):
-    """Delete record."""
-    # TODO: Implement record deletion with Lance
-    return None
+    """Scan records in a dataset."""
+    if limit > 1000:
+        limit = 1000
+    
+    store = PostgresRecordStore(session)
+    result = await store.scan(dataset_id, cursor=cursor, limit=limit)
+    
+    return [
+        RecordResponse(
+            record_id=r.record_id,
+            fields=r.fields,
+            metadata=r.metadata,
+            provenance=r.provenance,
+            quality=r.quality,
+            status=r.status,
+            reject_reason=r.reject_reason,
+            embedding=r.embedding,
+        )
+        for r in result.records
+    ]
+
+
+@router.post("/{dataset_id}/records:search", response_model=List[RecordResponse])
+async def filter_records(
+    dataset_id: str,
+    filter_req: FilterRequest,
+    tenant_id: str = Depends(current_tenant),
+    session=Depends(db),
+):
+    """Search records using filter DSL."""
+    store = PostgresRecordStore(session)
+    records = await store.filter(dataset_id, filter_req.filter, limit=filter_req.limit)
+    
+    return [
+        RecordResponse(
+            record_id=r.record_id,
+            fields=r.fields,
+            metadata=r.metadata,
+            provenance=r.provenance,
+            quality=r.quality,
+            status=r.status,
+            reject_reason=r.reject_reason,
+            embedding=r.embedding,
+        )
+        for r in records
+    ]
+
+
+@router.post("/{dataset_id}/records:semantic-search", response_model=List[RecordResponse])
+async def semantic_search_records(
+    dataset_id: str,
+    vector: List[float],
+    k: int = 10,
+    tenant_id: str = Depends(current_tenant),
+    session=Depends(db),
+):
+    """Semantic search for similar records."""
+    store = PostgresRecordStore(session)
+    records = await store.semantic_search(dataset_id, vector, k=k)
+    
+    return [
+        RecordResponse(
+            record_id=r.record_id,
+            fields=r.fields,
+            metadata=r.metadata,
+            provenance=r.provenance,
+            quality=r.quality,
+            status=r.status,
+            reject_reason=r.reject_reason,
+            embedding=r.embedding,
+        )
+        for r in records
+    ]
